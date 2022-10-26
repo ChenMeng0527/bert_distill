@@ -2,7 +2,7 @@
 
 import torch
 from transformers import BertTokenizer
-from ptbert import *
+from A_ptbert import *
 from small import *
 from utils import *
 

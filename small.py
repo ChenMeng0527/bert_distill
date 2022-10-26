@@ -66,7 +66,8 @@ class Model(object):
     # self.model = CNN(v_size,256,128,2)
     def train(self, x_tr, y_tr, l_tr, x_te, y_te, l_te, epochs=15):
         assert self.model is not None
-        if USE_CUDA: self.model = self.model.cuda()
+        if USE_CUDA:
+            self.model = self.model.cuda()
         loss_func = nn.NLLLoss()
         opt = optim.Adam(self.model.parameters(), lr=self.lr)
         for epoch in range(epochs):

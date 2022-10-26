@@ -52,23 +52,40 @@ class Processor(object):
 
 
 def convert_examples_to_features(examples, label_list, max_seq, tokenizer):
+    '''
+    构造输入bert的输入
+        input_ids、input_mask、label_id
+    :param examples:
+    :param label_list:
+    :param max_seq:
+    :param tokenizer:
+    :return:
+    '''
     label_map = {label: i for i, label in enumerate(label_list)}
     features = []
     for ex_index, example in enumerate(examples):
+        # 用tokenizer将文本切割，前后加上[cls],[sep]
         tokens = tokenizer.tokenize(example.text)
         tokens = ["[CLS]"] + tokens[:max_seq - 2] + ["[SEP]"]
+        # token转id
         input_ids = tokenizer.convert_tokens_to_ids(tokens)
         input_mask = [1] * len(input_ids)
         padding = [0] * (max_seq - len(input_ids))
         label_id = label_map[example.label]
-        features.append(InputFeatures(
-            input_ids=input_ids + padding,
-            input_mask=input_mask + padding,
-            label_id=label_id))
+        # 输入
+        #    1:为index+padding  有疑问？？？？？
+        #    2:mask = [1,1,1,1,0,0]  有疑问？？？？？
+        features.append(InputFeatures(input_ids=input_ids + padding,
+                                      input_mask=input_mask + padding,
+                                      label_id=label_id))
     return features
 
 
+
 class BertClassification(BertPreTrainedModel):
+    '''
+    bert分类模型
+    '''
     def __init__(self, config, num_labels=2):
         super(BertClassification, self).__init__(config)
         self.num_labels = num_labels
@@ -78,6 +95,13 @@ class BertClassification(BertPreTrainedModel):
         self.init_weights()
 
     def forward(self, input_ids, input_mask, label_ids):
+        '''
+        bert输出+dropout+NN
+        :param input_ids:
+        :param input_mask:
+        :param label_ids:
+        :return:
+        '''
         _, pooled_output = self.bert(input_ids, None, input_mask)
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
@@ -85,6 +109,7 @@ class BertClassification(BertPreTrainedModel):
             loss_fct = CrossEntropyLoss()
             return loss_fct(logits.view(-1, self.num_labels), label_ids.view(-1))
         return logits
+
 
 
 class BertTextCNN(BertPreTrainedModel):
@@ -100,15 +125,33 @@ class BertTextCNN(BertPreTrainedModel):
         self.apply(self.init_bert_weights)
 
     def forward(self, input_ids, input_mask, label_ids):
+        '''
+        bert输出 + 3个卷积池化 + 卷积池化结果拼接 + NN
+        :param input_ids:
+        :param input_mask:
+        :param label_ids:
+        :return:
+        '''
+        # 输入bert,得到[B,S,E]
         sequence_output, _ = self.bert(input_ids, None, input_mask, output_all_encoded_layers=False)
+        # dropout + 增加维度 = [B,1,S,E]
         out = self.dropout(sequence_output).unsqueeze(1)
-        c1 = torch.relu(self.conv1(out).squeeze(3))
-        p1 = F.max_pool1d(c1, c1.size(2)).squeeze(2)
+
+        # 卷积--relu--maxpool
+        c1 = torch.relu(self.conv1(out).squeeze(3)) # [B,1,S*E]
+        p1 = F.max_pool1d(c1, c1.size(2)).squeeze(2)  # 先# [B,1,1] 再 [B,1]
+
+        # 卷积--relu--maxpool
         c2 = torch.relu(self.conv2(out).squeeze(3))
         p2 = F.max_pool1d(c2, c2.size(2)).squeeze(2)
+
+        # 卷积 - -relu - -maxpool
         c3 = torch.relu(self.conv3(out).squeeze(3))
         p3 = F.max_pool1d(c3, c3.size(2)).squeeze(2)
+
+        # 将三个卷积池化结果拼接为[B,3]
         pool = self.dropout(torch.cat((p1, p2, p3), 1))
+        # NN
         logits = self.classifier(pool)
         if label_ids is not None:
             loss_fct = CrossEntropyLoss()
@@ -117,30 +160,39 @@ class BertTextCNN(BertPreTrainedModel):
 
 
 def compute_metrics(preds, labels):
-    return {'ac': (preds == labels).mean(), 'f1': f1_score(y_true=labels, y_pred=preds)}
+    return {'ac': (preds == labels).mean(),
+            'f1': f1_score(y_true=labels, y_pred=preds)}
 
 
-def main(bert_model='bert-base-chinese', cache_dir=None,
-         max_seq=128, batch_size=16, num_epochs=10, lr=2e-5):
+def main(bert_model='bert-base-chinese',
+         cache_dir=None,
+         max_seq=128,
+         batch_size=16,
+         num_epochs=10,
+         lr=2e-5):
     processor = Processor()
+    # 返回训练数据的InputExample
     train_examples = processor.get_train_examples('data/hotel')
+    # [0,1]
     label_list = processor.get_labels()
     tokenizer = BertTokenizer.from_pretrained(bert_model, do_lower_case=True)
-    model = BertClassification.from_pretrained(bert_model,
-                                               cache_dir=cache_dir, num_labels=len(label_list))
+    model = BertClassification.from_pretrained(bert_model, cache_dir=cache_dir, num_labels=len(label_list))
     # model = BertTextCNN.from_pretrained(bert_model,\
     # 	cache_dir=cache_dir,num_labels=len(label_list))
     model.to(device)
     param_optimizer = list(model.named_parameters())
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in param_optimizer if not \
-            any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
-        {'params': [p for n, p in param_optimizer if \
-                    any(nd in n for nd in no_decay)], 'weight_decay': 0.00}]
+                                    {'params': [p for n, p in param_optimizer if not \
+                                        any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+                                    {'params': [p for n, p in param_optimizer if \
+                                                any(nd in n for nd in no_decay)], 'weight_decay': 0.00}
+                                   ]
     print('train...')
     num_train_steps = int(len(train_examples) / batch_size * num_epochs)
     optimizer = AdamW(optimizer_grouped_parameters, lr=lr)
+
+    #
     train_features = convert_examples_to_features(train_examples, label_list, max_seq, tokenizer)
     all_input_ids = torch.tensor([f.input_ids for f in train_features], dtype=torch.long)
     all_input_mask = torch.tensor([f.input_mask for f in train_features], dtype=torch.long)
@@ -148,6 +200,8 @@ def main(bert_model='bert-base-chinese', cache_dir=None,
     train_data = TensorDataset(all_input_ids, all_input_mask, all_label_ids)
     train_sampler = RandomSampler(train_data)
     train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=batch_size)
+
+    #
     model.train()
     for _ in trange(num_epochs, desc='Epoch'):
         tr_loss = 0
@@ -159,6 +213,9 @@ def main(bert_model='bert-base-chinese', cache_dir=None,
             optimizer.zero_grad()
             tr_loss += loss.item()
         print('tr_loss', tr_loss)
+
+
+    # ---验证集处理
     print('eval...')
     eval_examples = processor.get_dev_examples('data/hotel')
     eval_features = convert_examples_to_features(eval_examples, label_list, max_seq, tokenizer)

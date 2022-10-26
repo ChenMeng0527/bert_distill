@@ -23,7 +23,7 @@
 
 首先finetune BERT
 ```bash
-python ptbert.py
+python A_ptbert.py
 ```
 
 然后把BERT的知识蒸馏到小模型里
@@ -32,7 +32,7 @@ python ptbert.py
 
 然后
 ```bash
-python distill.py
+python B_distill.py
 ```
 
 调整文件中的`use_aug`及以下的参数可以使用论文中提到的其中两种数据增强方式(masking, n-gram sampling)
